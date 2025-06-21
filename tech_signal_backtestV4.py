@@ -8,109 +8,149 @@ Created on Wed Jun 18 18:36:19 2025
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import pdblp
 import datetime
 from dateutil.relativedelta import relativedelta
 import stockstats
 import plotly.offline as py
-from plotly.graph_objs import *
+import plotly.graph_objs as go 
 from plotly.subplots import make_subplots
-import os
+import math
 import sys
 sys.path.append('C:/Users/yuewang/Desktop/python scripts/')
 from common_function import Common_Data
 
 pd.set_option('display.max_columns',20)
 
-# Signal_backtest:
-# For a given curve signal, evaluate return rate, maxdd & time on stick
-# Rolling backtest: move signal date forward by N holding days, max loss, ave profit, ave return,
-# Sort & select best signal for forward test
-# Test both signal input and average trend more than macdhi
+#ma 10 stop loss
+#6m back rolling MA1 test
+#chart on cumpnl and risk return rate, MA10 line on stick
+#table:'ave.VAR','Risk Return ratio','Sharpe ratio','Signal correct rate','Ave. total PnL','Ave. Pnl per trade','Max Profit per trade','Max Loss per trade','Max holding days per trade','Min holding days per trade','Ave.holding days per trade','stop level','total sl count'
 
-# Test rolling forward
-# Start: 6 months before 4 days prior to delivery date
-# End: 3 days prior to delivery date
+#V1: add if macd <> +-1, use trend more than macdh
+#v2 test md vs ma
+#v3 add ts signal fanction
+#v4 rebuild signal system, 3 signals on the right table, chart add option show which signal
 
-# Strategy: KDJ, MACD and Trend vector
-# Logic:
-#   Close and Stop Loss:
-#       Prices:
+'''
+Test:
+    MA1 rolling forward
+    start: 6 months before 3 days prior to delivery date
+    end: 3 days prior to delivery date
+    
+Strategy:
+    Signal: KDJ, MACD and Trend vector
+    Logic:
+        Close and Stop Loss:
+        Prices:
+Statistics:
+    VaR: 2*30 days std
+    Risk Return ratio:  total return / Sum. VaR
+    sharpe ratio: mean return / return.std
+    Cum. PnL: cum sum return
+    Correct rate: correct signal num. / total signal num.
+    Average PnL: Ave. return
+    Max Profit: Max return
+    Max Loss: SL or Min return
+    Max holding days: max signal last days
+    min holding days: min signal last days
+    Ave. holding days: ave. signal last days
+'''
 
-# Statistics:
-#   VaR: x last days std
-#   Current PnL: current total return / sumL VaR
-#   Average return / return.std
-#   Average PnL
-#   Correct rate: correct signal num. / total signal num.
-#   Current PnL: ave. return
-#   Ave. PnL
-#   Max loss: SL or return
-#   Max PnL: SL or return
-#   Ave. Holding days: signal last days
-#   Max Holding days: signal last days
-#   Ave. holding days: ave. signal last days
 
 class Signal_backtest():
-    def ttf_curve(self, ticker):
-        today = datetime.date.today() + relativedelta(days=+2)
-        start_date = (datetime.date.today() + relativedelta(days=-90)).strftime('%Y%m%d')
-        end_date = today.strftime('%Y%m%d')
+    
+    def ttf_curve(ticker):
+        today = (datetime.date.today() - relativedelta(days=0)).strftime('%Y%m%d')
+        start_date = '20170101'#(datetime.date.today() + relativedelta(days=-90)).strftime('%Y%m%d')
+        #end_date = today.strftime('%Y%m%d')
         
-        dfbigspot = Common_Data().get_curve(ticker, fldlist=['PK_OPEN','PK_HIGH','PK_LOW','PK_LAST'], start_date=start_date, end_date=today, longdata=True)
-        dfbigspot_pivot = pd.pivot_table(dfbigspot, values='PK_LAST', index=['INDX','TRADEDATE'], columns='TICKER')
-        dfbigspot_pivot = dfbigspot_pivot.fillna(method='pad')
-        dfbigspot_pivot.index = dfbigspot_pivot.index.droplevel(0)
-        self.dfbigspot = dfbigspot
-        self.dfbigspot_pivot = dfbigspot_pivot
+        dfbbgttf = con.bdh(tickers = ticker, flds=['PX_OPEN','PX_HIGH','PX_LOW','PX_LAST'], start_date=start_date, end_date=today, longdata=True)
+        dfbbgttf = dfbbgttf[['date','field','value']]
+        dfbbgttf_group = dfbbgttf.groupby(['date', 'field'], as_index = False).mean()
+        dfbbgttf_pivot = pd.pivot(dfbbggroup, index = 'date', columns = 'filed')
+        dfbbgttf_pivot.columns =  dfbbgttf_povit.columns.droplevel(0)
+        
+        return dfbbgttf_pivot
+        
 
-    def curve_start_end(dfbigttf_pivot, end_ndday, start_mm_paras_dict):
-        end_date = dfbigttf_pivot.index[-1] - end_ndday
-        start_date = (end_date - relativedelta(months=start_mm))\
-                     .year * 100 + (end_date - relativedelta(months=start_mm)).month * 100 + 1
-        dfdaily = dfbigttf_pivot[['PX_LAST']].rolling(paras_dict['move_ave_1']).mean()
-        dfdaily = dfbigttf_pivot[['PX_LAST']].rolling(30).std()
-        dfdaily = dfbigttf_pivot.loc[start_date:end_date]
+    def curve_start_end(dfbbgttf_pivot, end_nbday, start_mm, para_dict):
+        end_date = dfbbgttf_pivot.index[-end_nbday]
+        start_date = str((end_date-relativedelta(months=start_nm)).year) + '-' + str((end_date-relativedelta(months=start_nm)).month) + '-01'
+        
+        dfbbgttf_pivot['ma'] = dfbbgttf_pivot['PX_LAST'].rolling(para_dict['move ave.']).mean()
+        dfbbgttf_pivot['std'] = dfbbgttf_pivot['PX_LAST'].rolling(30).std()
+        dfdaily = dfbbgttf_pivot.loc[start_date:end_date]
+        
+        #avoid kdj nan, as same close high low <=, change to < at v4
+        
         # end_date if start_date <= '2020-12-31':
         #   end_date = pd.to_datetime('2020-12-31')
-        if dfdaily.loc[dfdaily.index[0], 'PX_HIGH'] < dfdaily.loc[dfdaily.index[0], 'PX_LAST']:
-            dfdaily.loc[dfdaily.index[0], 'PX_LAST'] = dfdaily.loc[dfdaily.index[0], 'PX_LOW']
-        if dfdaily.loc[dfdaily.index[0], 'PX_LOW'] > dfdaily.loc[dfdaily.index[0], 'PX_LAST']:
-            dfdaily.loc[dfdaily.index[0], 'PX_LAST'] = 2 * dfdaily.loc[dfdaily.index[0], 'PX_LAST'] - dfdaily.loc[dfdaily.index[0], 'PX_HIGH']
+        if dfdaily.loc[dfdaily.index[0], 'PX_HIGH'] < dfdaily.loc[dfdaily.index[0], 'PX_LOW']:
+            dfdaily.loc[dfdaily.index[0], 'PX_LOW'] = 2 * dfdaily.loc[dfdaily.index[0], 'PX_LAST'] - dfdaily.loc[dfdaily.index[0], 'PX_HIGH']
         
         return dfdaily
 
     def ticker_to_cont(ticker):
         month_dict = {
-            'Jan': 'F', 'Feb': 'G', 'Mar': 'H', 'Apr': 'J', 'May': 'K', 'Jun': 'M',
-            'Jul': 'N', 'Aug': 'Q', 'Sep': 'U', 'Oct': 'V', 'Nov': 'X', 'Dec': 'Z'
+            'Jan': 'F', 
+            'Feb': 'G', 
+            'Mar': 'H', 
+            'Apr': 'J', 
+            'May': 'K', 
+            'Jun': 'M',
+            'Jul': 'N', 
+            'Aug': 'Q', 
+            'Sep': 'U', 
+            'Oct': 'V', 
+            'Nov': 'X', 
+            'Dec': 'Z'
         }
         new_month_dict = {v: k for k, v in month_dict.items()}
-
-        if ticker[3] == 'T':
-            if ticker[0:3] == 'TTF':
-                contract = new_month_dict[ticker[3]] + '2' + ticker[4]
-                if len(ticker) == 7:
-                    contract = new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
-                return contract
-            if ticker[0:3] == 'Q07':
-                contract = new_month_dict[ticker[3]] + '2' + ticker[4]
-                if len(ticker) == 7:
-                    contract = new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
-                return contract
-            if ticker[0:4] == 'NBP':
-                contract = new_month_dict[ticker[3]] + '2' + ticker[4]
-                if len(ticker) == 7:
-                    contract = new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
-                return contract
-            if ticker == 'TTF1 Contdty':
-                contract = 'M24'
-                return contract
+        #month
+        if ticker[0:3] == 'TZT':
+            if len(ticker) == 12:
+                contract = 'FM ' + new_month_dict[ticker[3]] + '2' + ticker[4]
+            if len(ticker) == 14:
+                contract = 'FM TS' + new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
+            if len(ticker) == 13:
+                contract = 'FM ' + new_month_dict[ticker[3]] + ticker[4:6]
+         
+        #quarter name
+        if ticker[0:3] == 'QTZ':
+            if len(ticker) == 12:
+                contract = 'FQ ' + new_month_dict[ticker[3]] + '2' + ticker[4]
+            if len(ticker) == 14:
+                contract = 'FQ TS' + new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
+            
+        #season name qqtv24 Comdty
+        if ticker[0:4] == 'QQTV' or ticker[0:4] == 'QQTJ':
+            if len(ticker) == 12:
+                contract = 'FS ' + new_month_dict[ticker[3]] + '2' + ticker[4]
+            if len(ticker) == 14:
+                contract = 'FS TS' + new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
+            if len(ticker) == 13:
+                contract = 'FS ' + new_month_dict[ticker[3]] + ticker[4:6]
+         
+        #year
+        if ticker[0:4] == 'QTTF':
+            if len(ticker) == 12:
+                contract = 'FY ' + new_month_dict[ticker[3]] + '2' + ticker[4]
+            if len(ticker) == 14:
+                contract = 'FY TS' + new_month_dict[ticker[3]] + '2' + ticker[4] + new_month_dict[ticker[5]] + '2' + ticker[6]
+                
+                
+        #MA1
+        if ticker == 'TZT1 Comdty':
+            contract = 'MA1'
+            
+        return contract
 
     def signal(dfdaily, ticker, para_dict):
         today = datetime.date.today()
 
         stock = stockstats.StockDataFrame.retype(dfdaily)
+        '''
         for i in stock.index:
             if stock.loc[i, 'px_high'] > 0:
                 pass
@@ -126,13 +166,14 @@ class Signal_backtest():
                 pass
             else:
                 stock.loc[i, 'px_open'] = stock.loc[i, 'px_last']
-
+        '''
+        
         # delete na value and fill na with close
         stock.dropna(subset = ['px_last'], inplace=True)
         for i in stock.columns:
             stock[i].fillna(stock['px_last'], inplace=True)
 
-        # K线
+        
         stock['open'] = stock['px_open']
         stock['close'] = stock['px_last']
         stock['high'] = stock['px_high']
@@ -148,22 +189,26 @@ class Signal_backtest():
         result['ma'] = dfdaily['ma']
         result['std'] = dfdaily['std']
         result['chart_close'] = stock['close']  # close for chart
-        result['mid'] = (result['high'] + result['low']) / 2
-        result['macd'] = stock['macd']
-        result['macdh'] = stock['macdh']
-        result['macds'] = stock['macds'].round(2)
-        result['kdj'] = stock['kdj']
-        result['rsv'] = stock[para_dict['kdj_s']]  # stock['kdj_3']
+        result['close'] = (result['high'] + result['low']) / 2
+        result['MACD'] = stock['macd']*1
+        result['macds'] = stock['macds']
+        result['macdh'] = (stock['macdh']*2).round(2)
+        result['K'] = stock['kdjk']
+        result['D'] = stock['kdjd']
+        result['J'] = stock[para_dict['kdj_j']]
         '''
         # KDJ, avoid stockstats KDJ all nan
-        ln = result['low'].rolling(window=days, min_periods=1).min()
-        hn = result['high'].rolling(window=days, min_periods=1).max()
-        in_ = result['low'].values
-        out_ = result['high'].values
+        ndays = 6
+        ln = result['low'].rolling(window=ndays, min_periods=1).min()
+        hn = result['high'].rolling(window=ndays, min_periods=1).max()
+        result['ln'] = ln.values
+        result['hn'] = hn.values
         result['rsv'] = 100 * (result['close'] - result['ln']) / (result['hn'] - result['ln'])
-        result['k'] = result['rsv'].shift(1, fill_value=50) * 2/3 + result['rsv'] * 1/3
-        result['d'] = result['k'].shift(1, fill_value=50) * 2/3 + result['k'] * 1/3
-        result['j'] = 3 * result['k'] - 2 * result['d']
+        result['K'] = 50
+        result['D'] = 50
+        result['K'] = result['K'].shift(1, fill_value=50) * 2/3 + result['rsv'] * 1/3
+        result['D'] = result['D'].shift(1, fill_value=50) * 2/3 + result['K'] * 1/3
+        result['J'] = 3 * result['K'] - 2 * result['D']
         '''
         '''
         MD = MD1 + (Price -MD1) / (N * (Price/MD1)^4)
